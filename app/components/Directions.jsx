@@ -29,7 +29,7 @@ export default function Directions() {
     // Use a unified query that only matters if a search input is active
     const queryToFilter = activeSearch ? currentQuery : "";
 
-    const port = "http://192.168.153.242:8080";
+    const port = process.env.EXPO_PUBLIC_API_URL;
 
     const fetchBusLineInfo = useCallback(async (startBusStopName, endBusStopName) => {
         const url = `${port}/routeInfo`;
@@ -235,9 +235,7 @@ export default function Directions() {
                         <Text style={{ color: "white", fontWeight: "bold", fontSize: 16 }}>View Detailed Route</Text>
                     </TouchableOpacity>
                 </View>
-
             </View>
-
         )
     } else if (isCalculatingRoute) {
         context = (
@@ -278,7 +276,14 @@ export default function Directions() {
             </View>
         )
 
-    } else {
+    } else if (routeData && startQuery !== "" && endQuery !== "") {
+        context = (
+                          <View style={{backgroundColor: "#FEF9C3", padding: 10, gap: 10}}>
+                <Text style={{color: "#A16207", fontWeight: "bold", fontSize: 15}}>⚠️ No Direct Route Found</Text>
+                <Text style={{color: "#A16207"}}>Try swapping your start/end points or searching for alternate stops.</Text>
+            </View>
+        )
+    } else if (startQuery === "" && endQuery === ""){
         context = (
             // Preview text 
             <View style={styles.previewContainer}>

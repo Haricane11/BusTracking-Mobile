@@ -13,7 +13,8 @@ export default function Index() {
   const [currentLocation, setCurrentLocation] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const port = "http://192.168.153.242:8080";
+ const port = process.env.EXPO_PUBLIC_API_URL;
+
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
