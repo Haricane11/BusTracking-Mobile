@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+   
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+   
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+
+   
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+
+   
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <style>
+    html,
+    body,
+    #map {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #location-btn {
+      position: absolute;
+      top: 40px;
+      right: 16px;
+      z-index: 20;
+      width: 35px;
+      height: 35px;
+      background-color: white;
+      border: none;
+      border-radius: 50%;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    #location-btn:active {
+      background-color: #f0f0f0;
+    }
+
+    #location-btn svg {
+      width: 24px;
+      height: 24px;
+      fill: #4a5568;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <button id="location-btn" title="Center Location">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+      <g data-name="48.Target">
+        <path
+          d="M12 24a12 12 0 1 1 12-12 12.013 12.013 0 0 1-12 12zm0-22a10 10 0 1 0 10 10A10.011 10.011 0 0 0 12 2z" />
+        <path d="M12 18a6 6 0 1 1 6-6 6.006 6.006 0 0 1-6 6zm0-10a4 4 0 1 0 4 4 4 4 0 0 0-4-4z" />
+        <path d="M11 4h2v6h-2zM11 14h2v6h-2zM14 11h6v2h-6zM4 11h6v2H4z" />
+      </g>
+    </svg>
+  </button>
+   
+  <script>
+    mapboxgl.accessToken = 'pk.eyJ1IjoiaGFyaWNhbmUiLCJhIjoiY2x5NGlqODRvMDJ3NDJqcTNoaWc0cWJxaCJ9.HVFoICBbwGVSUy59cytw0Q';
+
+    let map = null;
+    // Global array to track ALL markers (user, nearby stops, and route stops)
+    let markers = [];
+    const SEARCH_RADIUS_KM = 0.7;
+
+    // --- Route Constants for API & Layer Naming ---
+    const ROUTE_SOURCE_ID = 'bus-route-source';
+    const ROUTE_LAYER_ID = 'bus-route-road-line';
+    const PROFILE = 'driving'; // Use driving profile for bus routes
+
+    /* 🔹 Send logs back to React Native */
+    function logToRN(msg) {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(
+          JSON.stringify({ type: 'LOG', message: msg })
+        );
+      }
+    }
+
+    /* 🔹 Send messages about button logic to React Native */
+    function postToRN(type, data) {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(
+          JSON.stringify({ type: 'REQUEST_LOCATION', message: data })
+        );
+      }
+    }
+
+
+
+
+    /* 🔹 Initialize map ONCE and wait for load */
+    function initializeMap(callback) {
+      if (map) return callback?.();
+
+      map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [96.155, 16.8],
+        zoom: 10,
+      });
+
+      map.on('load', () => {
+        callback?.();
+      });
+    }
+
+    /* 🔹 Cleans up the previous route line */
+    function cleanupRouteLine() {
+      if (map.getLayer(ROUTE_LAYER_ID)) map.removeLayer(ROUTE_LAYER_ID);
+      if (map.getSource(ROUTE_SOURCE_ID)) map.removeSource(ROUTE_SOURCE_ID);
+    }
+
+    /* 🔹 Adds markers for each bus stop on the route */
+    function addRouteMarkers(routeInfo) {
+      if (!map || !routeInfo) return;
+
+      routeInfo.forEach((stop, index) => {
+        const isStart = index === 0;
+        const isEnd = index === routeInfo.length - 1;
+
+        // Logic for the label title
+        let stopLabel = 'Bus Stop';
+        if (isStart) stopLabel = 'Start Stop';
+        if (isEnd) stopLabel = 'End Stop';
+
+        // Styling: Red for terminal stops, Blue for intermediate
+        const color = (isStart || isEnd) ? '#e63946' : '#007cbf';
+        const scale = (isStart || isEnd) ? 0.8 : 0.7;
+
+        const coords = [stop.longitude, stop.latitude];
+
+        const m = new mapboxgl.Marker({ color: color, scale: scale })
+          .setLngLat(coords)
+          .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(`
+            <div style="padding: 5px;">
+              <h5 style="color: black; margin: 0 0 5px 0; font-family: sans-serif;">
+                ${stopLabel}: <span style="color: ${color}">${stop.name_en}</span>
+              </h5>
+              <h5 style="color: black; margin: 0; font-family: sans-serif;">
+                မှတ်တိုင်: <span style="color: ${color}">${stop.name_mm}</span>
+              </h5>
+            </div>
+      `))
+          .addTo(map);
+
+        markers.push(m);
+      });
+    }
+
+
+    /* 🔹 FETCH route from Directions API and DRAW the route on the road */
+    async function fetchAndDrawRouteOnRoad(routeInfo) {
+      if (!map || !routeInfo || routeInfo.length < 2) {
+        return;
+      }
+
+      cleanupRouteLine();
+
+      // Format waypoints for the Directions API
+      // API requires coordinates in the format: lng,lat;lng,lat;...
+      const waypoints = routeInfo
+        .map(stop => `${stop.longitude},${stop.latitude}`)
+        .join(';');
+
+      const url = `https://api.mapbox.com/directions/v5/mapbox/${PROFILE}/${waypoints}?geometries=geojson&access_token=${mapboxgl.accessToken}`;
+
+      try {
+        const response = await fetch(url);
+        const json = await response.json();
+
+        if (!json.routes || json.routes.length === 0) {
+          return;
+        }
+
+        const route = json.routes[0].geometry;
+
+
+        // 1. Add GeoJSON source for the road route
+        map.addSource(ROUTE_SOURCE_ID, {
+          'type': 'geojson',
+          'data': {
+            'type': 'Feature',
+            'properties': {},
+            'geometry': route
+          }
+        });
+
+        // 2. Add the line layer to draw the route on the road
+        map.addLayer({
+          'id': ROUTE_LAYER_ID,
+          'type': 'line',
+          'source': ROUTE_SOURCE_ID,
+          'layout': {
+            'line-join': 'round',
+            'line-cap': 'round'
+          },
+          'paint': {
+            'line-color': '#0070f3', // Blue line
+            'line-width': 7,
+            'line-opacity': 0.8
+          }
+        });
+
+        // 3. Add the markers
+        addRouteMarkers(routeInfo);
+
+        // 4. Fit the map bounds to center between the two red markers (start/end stops)
+        try {
+          const startStop = routeInfo[0];
+          const endStop = routeInfo[routeInfo.length - 1];
+
+          // Create a LineString with just the start and end points to calculate the bounding box
+          const twoPointLine = {
+            'type': 'Feature',
+            'properties': {},
+            'geometry': {
+              'type': 'LineString',
+              'coordinates': [
+                [startStop.longitude, startStop.latitude],
+                [endStop.longitude, endStop.latitude]
+              ]
+            }
+          };
+
+          const startEndBbox = turf.bbox(twoPointLine);
+
+          map.fitBounds(startEndBbox, {
+            padding: 100, // Increased padding for better visibility of the two endpoints
+            maxZoom: 14
+          });
+        } catch (e) {
+          logToRN(`Error fitting bounds to start/end points: ${e.message}`);
+        }
+
+      } catch (error) {
+        logToRN(`Error fetching route from Mapbox: ${error.message}`);
+      }
+    }
+
+
+    /* 🔹 Main render logic */
+    function handleData(data) {
+      if (!map) return;
+
+      const { busStops, currentLocation, specificBusStop, routeInfo } = data;
+
+      /* Cleanup ALL markers, search circle, and previous route lines */
+      markers.forEach(m => m.remove());
+      markers = []; // Reset the global markers array
+
+      // Clean up search circle layers/sources
+      if (map.getLayer('search-circle-fill')) map.removeLayer('search-circle-fill');
+      if (map.getSource('search-circle-source')) map.removeSource('search-circle-source');
+
+      // Clean up previous route line (Layer & Source)
+      cleanupRouteLine();
+
+
+      /* ⭐️ Draw the road-aware route and its markers if routeInfo is available */
+      if (routeInfo && routeInfo.length > 0) {
+        // Use the API-based function to draw the route following the roads
+        fetchAndDrawRouteOnRoad(routeInfo);
+        return;
+      }
+
+
+      /* 🔵 Specific bus stop (Only executes if no routeInfo is present) */
+      if (specificBusStop) {
+        const coords = [specificBusStop.longitude, specificBusStop.latitude];
+        const marker = new mapboxgl.Marker({ color: '#007cbf' })
+          .setLngLat(coords)
+         .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(`
+            <div style="padding: 5px;">
+              <h5 style="color: black; margin: 0 0 5px 0; font-family: sans-serif;">
+                Bus Stop: <span style="color: #007cbf">${specificBusStop.name_en}</span>
+              </h5>
+              <h5 style="color: black; margin: 0; font-family: sans-serif;">
+                မှတ်တိုင်: <span style="color: #007cbf">${specificBusStop.name_mm}</span>
+              </h5>
+            </div>
+      `))
+          .addTo(map);
+
+        markers.push(marker);
+        map.flyTo({ center: coords, zoom: 14 });
+        return;
+      }
+
+      /* 🧭 Current location and Nearby Stops (Only executes if no routeInfo or specificBusStop is present) */
+      const lng =
+        currentLocation?.longitude ??
+        currentLocation?.coords?.longitude;
+
+      const lat =
+        currentLocation?.latitude ??
+        currentLocation?.coords?.latitude;
+
+      if (!lng || !lat) {
+        return;
+      }
+
+      const userCoords = [lng, lat];
+
+      /* 🎯 Button Logic */
+      const locationBtn = document.getElementById('location-btn');
+      locationBtn.addEventListener('click', () => {
+        // Notify RN to refresh location
+        postToRN('REQUEST_LOCATION', { manual: true });
+        map.flyTo({ center: userCoords, zoom: 14 });
+
+      });
+
+      /* 🔵 User marker */
+      // CREATE CUSTOM USER MARKER (BLUE CIRCLE)
+      const userCircleEl = document.createElement('div');
+      userCircleEl.className = 'user-location-circle-marker';
+      userCircleEl.style.width = '16px';
+      userCircleEl.style.height = '16px';
+      userCircleEl.style.backgroundColor = '#4285F4';
+      userCircleEl.style.border = '2px solid white';
+      userCircleEl.style.borderRadius = '50%';
+      userCircleEl.style.boxShadow = '0 0 0 3px rgba(66, 133, 244, 0.3)';
+      userCircleEl.style.cursor = 'pointer';
+
+      const userMarker = new mapboxgl.Marker({ element: userCircleEl })
+        .setLngLat(userCoords)
+        .setPopup(new mapboxgl.Popup().setHTML('<h5 style="color: black">Your Current Location</h5>'))
+        .addTo(map);
+      markers.push(userMarker);
+
+      /* 🔵 Search circle */
+      const circle = turf.circle(
+        turf.point(userCoords),
+        SEARCH_RADIUS_KM,
+        { steps: 64, units: 'kilometers' }
+      );
+
+      map.addSource('search-circle-source', {
+        type: 'geojson',
+        data: circle,
+      });
+
+      map.addLayer({
+        id: 'search-circle-fill',
+        type: 'fill',
+        source: 'search-circle-source',
+        paint: {
+          'fill-color': '#007cbf',
+          'fill-opacity': 0.15,
+        },
+      });
+
+      /* 🟢 Nearby bus stops */
+      busStops?.forEach(stop => {
+        const coords = [stop.longitude, stop.latitude];
+        if (turf.booleanPointInPolygon(turf.point(coords), circle)) {
+          logToRN(JSON.stringify(stop))
+          const m = new mapboxgl.Marker({ color: '#00cc66', scale: 0.7 })
+            .setLngLat(coords)
+              .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(`
+                <div style="padding: 5px;">
+                  <h5 style="color: black; margin: 0 0 5px 0; font-family: sans-serif;">
+                    Bus Stop: <span style="color: #00cc66">${stop.name_en}</span>
+                  </h5>
+                  <h5 style="color: black; margin: 0; font-family: sans-serif;">
+                    မှတ်တိုင်: <span style="color: #00cc66">${stop.name_mm}</span>
+                  </h5>
+                </div>
+          `))
+            .addTo(map);
+          markers.push(m);
+        }
+      });
+
+      // Fly to user location only when displaying current location/nearby stops
+      map.flyTo({ center: userCoords, zoom: 14 });
+    }
+
+    /* 🔹 Unified message handler */
+    function onMessage(event) {
+      try {
+        const data = JSON.parse(event.data);
+        initializeMap(() => handleData(data));
+      } catch (e) {
+        logToRN(`Failed to parse data: ${e.message}`);
+      }
+    }
+
+    /* Android + iOS */
+    document.addEventListener('message', onMessage);
+    window.addEventListener('message', onMessage);
+  </script>
+
+</body>
+
+</html>
