@@ -117,22 +117,21 @@ export default function Directions() {
                 uniqueMap.set(stop.id, stop);
             }
         }
-
         // 3. Convert the map values back to an array for the FlatList data prop
         return Array.from(uniqueMap.values());
-
-    }, [busStops]); // Recalculate only when the source busStops array changes
-    // Filtering logic: Memoized so it doesn't redefine on every render
+    }, [busStops]); 
+    
     const filterBusStops = useCallback((stops, query) => {
         if (!query) return stops;
         const lowerQuery = query.toLowerCase();
         return stops.filter(stop => {
+
             const nameEn = stop.name_en ? stop.name_en.toLowerCase() : '';
             const nameMm = stop.name_mm ? stop.name_mm.toLowerCase() : '';
-            // Match in English or Myanmar names
+
             return nameEn.includes(lowerQuery) || nameMm.includes(lowerQuery);
         });
-    }, []); // Dependencies are empty, so it's created once
+    }, []); 
 
     // Memoize the full filtered list based on the active query
     const currentlyFilteredList = useMemo(
@@ -163,12 +162,10 @@ export default function Directions() {
 
 
     const handleSearchSubmit = () => {
-        // 1. Check if there's an active search and results exist
         if (activeSearch && currentlyFilteredList.length > 0) {
             const firstStop = currentlyFilteredList[0];
             setCurrentQuery(firstStop.name_en);
             setActiveSearch(null);
-
         }
     };
 
@@ -185,17 +182,16 @@ export default function Directions() {
             return acc;
         }, []).sort((a, b) => a - b); // Sort numerically (e.g., [35, 37, 61])
 
-        // Get the first (lowest) bus line ID
         const firstBusLineId = uniqueLines[0];
 
         if (firstBusLineId) {
-            // 2. Filter the original routeData to keep only the stops for the first bus line
+            
             const detailedRoute = routeData.filter(stop => stop.bus_line_id === firstBusLineId);
 
-            // 3. Store the filtered route in the new state to trigger the detailed view
+            // Store the filtered route in the new state to trigger the detailed view
             setSelectedRouteStops(detailedRoute);
 
-            // ✅ FIX: Update the context state here in the event handler (safe)
+            // Update the context state here in the event handler (safe)
             setRouteInfo(detailedRoute);
         }
     }
@@ -298,11 +294,9 @@ export default function Directions() {
         )
     }
 
-    const renderItem = ({ item, index }) => {
+    const renderItem = ({ item }) => {
         const handleSelectStop = () => {
-            // Set the English name to the currently active query input
             setCurrentQuery(item.name_en);
-            // Hide the list after selection by setting activeSearch to null
             setActiveSearch(null);
         };
 
@@ -349,8 +343,6 @@ export default function Directions() {
                             placeholder="Start bus stop... "
                             onFocus={() => setActiveSearch("start")}
                             onBlur={() => {
-                                // Only set to null if it was the active search, 
-                                // preventing rapid focus/blur from disrupting the other input
                                 if (activeSearch === "start") setActiveSearch(null);
                             }}
                             onChangeText={setStartQuery}

@@ -8,117 +8,90 @@ import { useEffect, useState } from 'react';
 
 
 export default function Index() {
-  const [busStopInfo, setBusStopInfo] = useState([]);
-  const [busLineInfo, setBusLineInfo] = useState([]);
-  const [currentLocation, setCurrentLocation] = useState(null);
+  const [data, setData] = useState({ stops: [], lines: [] });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState(null);
 
- const port = process.env.EXPO_PUBLIC_API_URL;
+  const port = process.env.EXPO_PUBLIC_API_URL;
 
-  useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+  const fetchData = async () => {
+    setLoading(true);
+    setError(false);
 
-      if (status !== 'granted') {
-        return;
-      }
+    // Create a timeout controller (e.g., 10 seconds)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-      setCurrentLocation([
-        location.coords.longitude,
-        location.coords.latitude,
+    try {
+      const [stopsRes, linesRes] = await Promise.all([
+        fetch(`${port}/busStopInfo`, { signal: controller.signal }),
+        fetch(`${port}/busLineInfo`, { signal: controller.signal })
       ]);
-    })();
-  }, []);
 
+      if (!stopsRes.ok || !linesRes.ok) throw new Error("Server Error");
 
+      const stopsData = await stopsRes.json();
+      const linesData = await linesRes.json();
+
+      setData({ stops: stopsData, lines: linesData });
+    } catch (err) {
+      console.error("Fetch failed:", err);
+      setError(true);
+    } finally {
+      clearTimeout(timeoutId);
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const url = `${port}/busLineInfo`;
-    const fetchBusLine = async () => {
-      try {
+      fetchData();
 
-        const res = await fetch(url, {
-          next: { revalidate: 300 }, // Revalidate every 5 minutes
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
+      (async () => {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+
+        if (status !== 'granted') {
+          return;
         }
-
-        const data = await res.json();
-        setBusLineInfo(data)
-        return data;
-
-      } catch (error) {
-        console.error("Error fetching bus Line Info:", error);
-        return []; // Return empty array instead of null for better error handling
-      }
-    }
-    fetchBusLine()
-
-  }, [])
-
-    useEffect(() => {
-    const url = `${port}/busStopInfo`;
-    const fetchBusStop = async () => {
-      try {
-
-        const res = await fetch(url, {
-          next: { revalidate: 300 }, // Revalidate every 5 minutes
-          headers: {
-            'Content-Type': 'application/json',
-          },
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
         });
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
+        
+        setCurrentLocation([
+          location.coords.longitude,
+          location.coords.latitude,
+        ]);
+      })();
 
-        const data = await res.json();
-        setBusStopInfo(data);
-        return data;
-
-      } catch (error) {
-        console.error("Error fetching bus stop Info:", error);
-        return []; // Return empty array instead of null for better error handling
-      }  finally {
-        setLoading(false)
-      }
-    }
-    fetchBusStop()
-
-  }, [])
-
-
-
+  }, []);
 
   if (loading) {
     return (
-      <View style={styles.mainContainer}>
-        <View style={styles.contentArea}>
-          <ActivityIndicator size="large" color="#0000ff" />
-          <Text style={{ marginTop: 10 }}>Loading ...</Text>
-        </View>
+      <View style={styles.contentArea}>
+        <ActivityIndicator size="large" color="#0000ff" />
+        <Text>Loading...</Text>
       </View>
     );
   }
 
-  return (
-    <ContextWrapper busStops={busStopInfo} busLines={busLineInfo}>
-      <View style={styles.mainContainer}>
-        
-      <View style={styles.mapContainer}>
-        <MapboxView
-          busStops={busStopInfo}
-          currentLocation={currentLocation}
-        />
+  if (error) {
+    return (
+      <View style={styles.contentArea}>
+        <Text>Could not load bus data.</Text>
+        <Text>Reload the page.</Text>
       </View>
+    );
+  }
+  return (
+    <ContextWrapper busStops={data.stops} busLines={data.lines}>
+      <View style={styles.mainContainer}>
+        <View style={styles.mapContainer}>
+          <MapboxView
+            busStops={data.stops}
+            currentLocation={currentLocation}
+          />
+        </View>
         <Navbar />
-
       </View>
     </ContextWrapper>
   );

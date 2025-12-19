@@ -9,7 +9,7 @@ import { useMyContext } from '../useContext/UseContext';
 import { useRef, useEffect, act } from "react"
 
 export default function Navbar() {
-  const { activeNav, setActiveNav, activeSearch, setSpecificBusStop, setRouteInfo } = useMyContext();
+  const { activeNav, setActiveNav, activeSearch, setActiveSearch, setSpecificBusStop, setRouteInfo } = useMyContext();
 
   // Function to close the navbar/popup
   const handleOnClick = () => {
@@ -38,6 +38,7 @@ export default function Navbar() {
 
     if(activeNav !== "Directions") {
       setRouteInfo(null)
+      setActiveSearch(null)
     } 
     
     if (activeNav !== "BusStops" || activeNav !== "Nearby") {
@@ -63,7 +64,7 @@ export default function Navbar() {
     styles.navbarContainer,
     { bottom: navbarBottomStyle }
   ];
-
+  
   const animatedPopupStyle = [
     styles.popupContainer,
     { height: popupHeightStyle }
